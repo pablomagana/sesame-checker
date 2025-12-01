@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sesame HR Pause</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background-color: #2e2e2e;
+            color: #ffffff;
+            font-size: 13px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 4px;
+            color: #cccccc;
+            font-weight: 500;
+        }
+
+        input[type="email"],
+        input[type="password"],
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #555555;
+            border-radius: 4px;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        input[type="email"]:focus,
+        input[type="password"]:focus,
+        select:focus {
+            outline: none;
+            border-color: #0099ff;
+            box-shadow: 0 0 0 1px #0099ff;
+        }
+
+        select option {
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+
+        button {
+            padding: 8px 16px;
+            background-color: #0099ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        button:hover {
+            background-color: #0077cc;
+        }
+
+        button:disabled {
+            background-color: #555555;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+            font-weight: 500;
+            margin-top: 8px;
+        }
+
+        .status.success {
+            background-color: #006600;
+            color: #ffffff;
+        }
+
+        .status.error {
+            background-color: #cc0000;
+            color: #ffffff;
+        }
+
+        .status.info {
+            background-color: #555555;
+            color: #ffffff;
+        }
+
+        .description {
+            color: #cccccc;
+            font-size: 12px;
+            line-height: 1.4;
+            margin-bottom: 16px;
+        }
+
+        .auth-status {
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .auth-status.authenticated {
+            background-color: #006600;
+            color: #ffffff;
+        }
+
+        .auth-status.not-authenticated {
+            background-color: #cc6600;
+            color: #ffffff;
+        }
+
+        .logout-btn {
+            background-color: #cc4400;
+            margin-top: 8px;
+        }
+
+        .logout-btn:hover {
+            background-color: #aa3300;
+        }
+
+        .break-selector {
+            margin-top: 12px;
+        }
+
+        .break-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+        }
+
+        .break-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .break-info {
+            flex: 1;
+        }
+
+        .break-name {
+            font-weight: 500;
+        }
+
+        .break-details {
+            font-size: 11px;
+            color: #aaaaaa;
+        }
+
+        .section-divider {
+            height: 1px;
+            background-color: #555555;
+            margin: 16px 0;
+        }
+
+        .loading {
+            text-align: center;
+            color: #aaaaaa;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="authStatus" class="auth-status" style="display: none;"></div>
+        
+        <div id="loginForm">
+            <div class="description">
+                Enter your Sesame HR credentials to enable pause functionality.
+            </div>
+
+            <div>
+                <label for="email">Email:</label>
+                <input type="email" id="email" placeholder="your.email@company.com" required>
+            </div>
+
+            <div>
+                <label for="password">Password:</label>
+                <input type="password" id="password" placeholder="Your Sesame HR password" required>
+            </div>
+
+            <button id="loginBtn">Login to Sesame HR</button>
+        </div>
+
+        <div id="loggedInSection" style="display: none;">
+            <div class="description">
+                You are logged in to Sesame HR. Select a break type for pausing.
+            </div>
+
+            <div class="section-divider"></div>
+
+            <div class="break-selector">
+                <label for="workBreakSelect">Select Break Type:</label>
+                <select id="workBreakSelect" style="min-height: 30px;">
+                    <option value="">Loading breaks...</option>
+                </select>
+                <div id="selectedBreakInfo" class="break-option" style="display: none; margin-top: 8px; padding: 8px; background-color: #3a3a3a; border-radius: 4px;">
+                    <div class="break-color" id="selectedBreakColor"></div>
+                    <div class="break-info">
+                        <div class="break-name" id="selectedBreakName"></div>
+                        <div class="break-details" id="selectedBreakDetails"></div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="logoutBtn" class="logout-btn">Logout</button>
+        </div>
+
+        <div id="status" class="status" style="display: none;"></div>
+    </div>
+
+    <script>
+        // Stream Deck SDK
+        let websocket = null;
+        let uuid = null;
+        let actionInfo = {};
+        let workBreaks = [];
+        let currentSettings = {};
+
+        // CSS color mapping for Sesame colors
+        const colorMap = {
+            'ssm-light-indigo': '#6366f1',
+            'ssm-coral': '#f97316',
+            'ssm-lime': '#84cc16',
+            'ssm-banana': '#eab308',
+            'ssm-turquoise': '#06b6d4'
+        };
+
+        function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo, inActionInfo) {
+            uuid = inUUID;
+            actionInfo = JSON.parse(inActionInfo);
+            
+            websocket = new WebSocket('ws://127.0.0.1:' + inPort);
+            
+            websocket.onopen = function() {
+                const json = {
+                    event: inRegisterEvent,
+                    uuid: inUUID
+                };
+                websocket.send(JSON.stringify(json));
+                
+                // Request global settings to check authentication status
+                requestGlobalSettings();
+                // Request action settings to get selected break
+                requestSettings();
+            };
+            
+            websocket.onmessage = function(evt) {
+                console.log('WebSocket message received:', evt.data);
+                const jsonObj = JSON.parse(evt.data);
+                console.log('Parsed message:', jsonObj);
+                
+                if (jsonObj.event === 'didReceiveGlobalSettings') {
+                    console.log('Handling global settings');
+                    handleGlobalSettings(jsonObj.payload.settings);
+                } else if (jsonObj.event === 'didReceiveSettings') {
+                    console.log('Handling action settings');
+                    handleSettings(jsonObj.payload.settings);
+                } else if (jsonObj.event === 'sendToPropertyInspector') {
+                    console.log('Handling plugin message:', jsonObj.payload);
+                    handlePluginMessage(jsonObj.payload);
+                } else {
+                    console.log('Unhandled message event:', jsonObj.event);
+                }
+            };
+        }
+
+        function requestGlobalSettings() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const json = {
+                    event: 'getGlobalSettings',
+                    context: uuid
+                };
+                websocket.send(JSON.stringify(json));
+            }
+        }
+
+        function requestSettings() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const json = {
+                    event: 'getSettings',
+                    context: uuid
+                };
+                websocket.send(JSON.stringify(json));
+            }
+        }
+
+        function handleGlobalSettings(settings) {
+            console.log('Received global settings:', settings);
+            
+            if (settings && settings.isAuthenticated && settings.email) {
+                // User is already authenticated
+                showAuthenticatedState(settings.email);
+                
+                // Check if we have work breaks in settings
+                if (settings.availableWorkBreaks && Array.isArray(settings.availableWorkBreaks)) {
+                    console.log(`Found ${settings.availableWorkBreaks.length} work breaks in global settings`);
+                    workBreaks = settings.availableWorkBreaks;
+                    populateWorkBreaksDropdown();
+                    
+                    if (workBreaks.length === 0) {
+                        showStatus('No work breaks available', 'info');
+                    } else {
+                        showStatus(`${workBreaks.length} work breaks loaded`, 'success');
+                    }
+                } else {
+                    console.log('No work breaks found in global settings, requesting from plugin...');
+                    loadWorkBreaks();
+                }
+            } else {
+                // User needs to login
+                showLoginForm();
+            }
+        }
+
+        function handleSettings(settings) {
+            console.log('Received action settings:', settings);
+            currentSettings = settings || {};
+            
+            // If we have a saved break selection, try to restore it
+            if (currentSettings.selectedWorkBreakId && currentSettings.selectedWorkBreakName) {
+                console.log(`Restoring saved break selection: "${currentSettings.selectedWorkBreakName}" (${currentSettings.selectedWorkBreakId})`);
+                
+                // Update dropdown selection if dropdown is populated
+                const select = document.getElementById('workBreakSelect');
+                if (select && select.options.length > 1) {
+                    select.value = currentSettings.selectedWorkBreakId;
+                    updateSelectedBreakDisplay();
+                    console.log('Dropdown selection restored');
+                } else {
+                    console.log('Dropdown not yet populated, will restore after work breaks load');
+                }
+            }
+        }
+
+        function handlePluginMessage(payload) {
+            console.log('handlePluginMessage called with:', payload);
+            
+            if (payload.event === 'workBreaksLoaded') {
+                console.log('Work breaks event detected!');
+                workBreaks = payload.workBreaks || [];
+                console.log(`Loaded ${workBreaks.length} work breaks from plugin:`, workBreaks);
+                
+                // Log each work break for debugging
+                workBreaks.forEach((wb, index) => {
+                    console.log(`  ${index + 1}. "${wb.name}" (ID: ${wb.id}, Color: ${wb.color})`);
+                });
+                
+                console.log('About to populate dropdown...');
+                populateWorkBreaksDropdown();
+                console.log('Dropdown populated');
+                
+                if (workBreaks.length === 0) {
+                    showStatus('No work breaks available', 'info');
+                } else {
+                    showStatus(`${workBreaks.length} work breaks loaded`, 'success');
+                }
+            } else {
+                console.log('Unknown plugin message event:', payload.event);
+            }
+        }
+
+        function showAuthenticatedState(email) {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('loggedInSection').style.display = 'block';
+            
+            const authStatus = document.getElementById('authStatus');
+            authStatus.textContent = `Logged in as: ${email}`;
+            authStatus.className = 'auth-status authenticated';
+            authStatus.style.display = 'block';
+            
+            // Automatically load work breaks when authenticated
+            console.log('User authenticated, loading work breaks...');
+            loadWorkBreaks();
+            
+            // Test communication with plugin
+            console.log('Sending test message to plugin...');
+            sendToPlugin({
+                event: 'testMessage',
+                message: 'Property Inspector loaded and authenticated'
+            });
+        }
+
+        function showLoginForm() {
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('loggedInSection').style.display = 'none';
+            
+            const authStatus = document.getElementById('authStatus');
+            authStatus.textContent = 'Not authenticated - Please login below';
+            authStatus.className = 'auth-status not-authenticated';
+            authStatus.style.display = 'block';
+        }
+
+        function loadWorkBreaks() {
+            console.log('loadWorkBreaks() called, sending message to plugin...');
+            // Request work breaks from the plugin
+            sendToPlugin({
+                event: 'loadWorkBreaks'
+            });
+            console.log('loadWorkBreaks message sent to plugin');
+        }
+
+        function populateWorkBreaksDropdown() {
+            console.log('populateWorkBreaksDropdown called');
+            const select = document.getElementById('workBreakSelect');
+            if (!select) {
+                console.error('workBreakSelect element not found!');
+                return;
+            }
+            
+            console.log('Clearing dropdown and adding default option');
+            select.innerHTML = '<option value="">Select a break type...</option>';
+            
+            console.log(`Adding ${workBreaks.length} work breaks to dropdown`);
+            workBreaks.forEach((workBreak, index) => {
+                console.log(`Adding option ${index + 1}: "${workBreak.name}"`);
+                const option = document.createElement('option');
+                option.value = workBreak.id;
+                option.textContent = workBreak.name;
+                select.appendChild(option);
+            });
+
+            console.log(`Dropdown now has ${select.options.length} options total`);
+
+            // Set the previously selected value if any
+            if (currentSettings.selectedWorkBreakId) {
+                console.log(`Setting previously selected value: ${currentSettings.selectedWorkBreakId}`);
+                select.value = currentSettings.selectedWorkBreakId;
+                updateSelectedBreakDisplay();
+                
+                // If we don't have the break name saved, update it
+                if (!currentSettings.selectedWorkBreakName) {
+                    const selectedBreak = workBreaks.find(wb => wb.id === currentSettings.selectedWorkBreakId);
+                    if (selectedBreak) {
+                        console.log(`Updating missing break name: ${selectedBreak.name}`);
+                        currentSettings.selectedWorkBreakName = selectedBreak.name;
+                        
+                        // Save updated settings
+                        if (websocket && websocket.readyState === WebSocket.OPEN) {
+                            const settingsPayload = {
+                                event: 'setSettings',
+                                context: uuid,
+                                payload: {
+                                    selectedWorkBreakId: currentSettings.selectedWorkBreakId,
+                                    selectedWorkBreakName: selectedBreak.name
+                                }
+                            };
+                            websocket.send(JSON.stringify(settingsPayload));
+                        }
+                    }
+                }
+                
+                showStatus(`Break "${currentSettings.selectedWorkBreakName || 'Unknown'}" selected`, 'success');
+            }
+            
+            console.log('populateWorkBreaksDropdown completed');
+        }
+
+        function updateSelectedBreakDisplay() {
+            const selectedBreakId = currentSettings.selectedWorkBreakId;
+            const selectedBreak = workBreaks.find(wb => wb.id === selectedBreakId);
+            
+            if (selectedBreak) {
+                document.getElementById('selectedBreakColor').style.backgroundColor = 
+                    colorMap[selectedBreak.color] || '#cccccc';
+                document.getElementById('selectedBreakName').textContent = selectedBreak.name;
+                document.getElementById('selectedBreakDetails').textContent = 
+                    `${selectedBreak.remunerated ? 'Paid' : 'Unpaid'} • ${selectedBreak.breakMinutes === 1439 ? 'All day' : selectedBreak.breakMinutes + ' min'}`;
+                document.getElementById('selectedBreakInfo').style.display = 'flex';
+            } else {
+                document.getElementById('selectedBreakInfo').style.display = 'none';
+            }
+        }
+
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+            statusEl.style.display = 'block';
+            
+            if (type !== 'error') {
+                setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        function sendToPlugin(payload) {
+            console.log('sendToPlugin called with payload:', payload);
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const json = {
+                    event: 'sendToPlugin',
+                    context: uuid,
+                    payload: payload
+                };
+                console.log('Sending to plugin:', json);
+                websocket.send(JSON.stringify(json));
+                console.log('Message sent successfully');
+            } else {
+                console.error('WebSocket not open:', websocket ? websocket.readyState : 'null websocket');
+            }
+        }
+
+        // Event Listeners
+
+        // Login functionality
+        document.getElementById('loginBtn').addEventListener('click', function() {
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value.trim();
+            
+            if (!email || !password) {
+                showStatus('Please enter both email and password', 'error');
+                return;
+            }
+            
+            const btn = this;
+            btn.disabled = true;
+            btn.textContent = 'Authenticating...';
+            
+            // Send credentials to plugin
+            sendToPlugin({
+                event: 'login',
+                email: email,
+                password: password
+            });
+            
+            // Reset button after delay and check auth status
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = 'Login to Sesame HR';
+                
+                // Request global settings again to check if login was successful
+                requestGlobalSettings();
+            }, 3000);
+        });
+
+        // Logout functionality
+        document.getElementById('logoutBtn').addEventListener('click', function() {
+            sendToPlugin({
+                event: 'logout'
+            });
+            
+            setTimeout(() => {
+                requestGlobalSettings();
+            }, 1000);
+        });
+
+        // Work break selection - add event listener with error checking
+        const workBreakSelect = document.getElementById('workBreakSelect');
+        if (workBreakSelect) {
+            console.log('Adding change event listener to workBreakSelect');
+            workBreakSelect.addEventListener('change', function() {
+            console.log('Dropdown change event triggered');
+            const selectedBreakId = this.value;
+            console.log('Selected break ID:', selectedBreakId);
+            
+            if (selectedBreakId) {
+                // Find the selected break to get its name
+                const selectedBreak = workBreaks.find(wb => wb.id === selectedBreakId);
+                const selectedBreakName = selectedBreak ? selectedBreak.name : '';
+                console.log('Selected break name:', selectedBreakName);
+                console.log('Selected break object:', selectedBreak);
+                
+                // Save selection to action settings
+                currentSettings.selectedWorkBreakId = selectedBreakId;
+                currentSettings.selectedWorkBreakName = selectedBreakName;
+                console.log('Updated currentSettings:', currentSettings);
+                
+                // Save settings directly using WebSocket
+                console.log('Saving settings directly via WebSocket...');
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    const settingsPayload = {
+                        event: 'setSettings',
+                        context: uuid,
+                        payload: {
+                            selectedWorkBreakId: selectedBreakId,
+                            selectedWorkBreakName: selectedBreakName
+                        }
+                    };
+                    console.log('Sending setSettings:', settingsPayload);
+                    websocket.send(JSON.stringify(settingsPayload));
+                }
+                
+                // Also try sending to plugin (for logging)
+                console.log('Also sending to plugin:', {
+                    event: 'selectWorkBreak',
+                    workBreakId: selectedBreakId,
+                    workBreakName: selectedBreakName
+                });
+                
+                sendToPlugin({
+                    event: 'selectWorkBreak',
+                    workBreakId: selectedBreakId,
+                    workBreakName: selectedBreakName
+                });
+
+                updateSelectedBreakDisplay();
+                showStatus(`Break "${selectedBreakName}" selected`, 'success');
+            } else {
+                console.log('No break selected (empty value)');
+                document.getElementById('selectedBreakInfo').style.display = 'none';
+            }
+            });
+        } else {
+            console.error('workBreakSelect element not found when adding event listener!');
+        }
+
+        // Allow Enter key to submit
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && document.getElementById('loginForm').style.display !== 'none') {
+                document.getElementById('loginBtn').click();
+            }
+        });
+        
+        // Debug function to test if everything is working
+        function debugPageState() {
+            console.log('=== DEBUG PAGE STATE ===');
+            console.log('workBreakSelect element:', document.getElementById('workBreakSelect'));
+            console.log('workBreaks array:', workBreaks);
+            console.log('currentSettings:', currentSettings);
+            console.log('websocket state:', websocket ? websocket.readyState : 'null');
+            console.log('uuid:', uuid);
+            console.log('========================');
+        }
+        
+        // Call debug function after a short delay
+        setTimeout(debugPageState, 2000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+{
+	"Name": "sesameCheck",
+	"Version": "0.1.0.0",
+	"Author": "pablo magaña",
+	"Actions": [
+		{
+			"Name": "Work Timer",
+			"UUID": "com.pablo-magaa.sesamecheck.worktimer",
+			"Icon": "imgs/actions/counter/icon",
+			"Tooltip": "Shows current work time and opens Sesame HR on click",
+			"PropertyInspectorPath": "ui/login-form.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/counter/key",
+					"TitleAlignment": "middle"
+				}
+			]
+		},
+		{
+			"Name": "Check In",
+			"UUID": "com.pablo-magaa.sesamecheck.checkin",
+			"Icon": "imgs/actions/counter/icon",
+			"Tooltip": "Check in to work",
+			"PropertyInspectorPath": "ui/login-form.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/counter/key",
+					"TitleAlignment": "middle"
+				},
+				{
+					"Image": "imgs/actions/counter/key",
+					"TitleAlignment": "middle"
+				}
+			]
+		},
+		{
+			"Name": "Check Out",
+			"UUID": "com.pablo-magaa.sesamecheck.checkout",
+			"Icon": "imgs/actions/counter/icon",
+			"Tooltip": "Check out from work",
+			"PropertyInspectorPath": "ui/login-form.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/counter/key",
+					"TitleAlignment": "middle"
+				},
+				{
+					"Image": "imgs/actions/counter/key",
+					"TitleAlignment": "middle"
+				}
+			]
+		},
+		{
+			"Name": "Pause",
+			"UUID": "com.pablo-magaa.sesamecheck.pause",
+			"Icon": "imgs/actions/counter/icon",
+			"Tooltip": "Pause work with selectable break type",
+			"PropertyInspectorPath": "ui/pause-form.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/counter/key",
+					"TitleAlignment": "middle"
+				}
+			]
+		}
+	],
+	"Category": "sesameCheck",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"CodePath": "bin/plugin.js",
+	"Description": "plugin to check-in and check-out",
+	"Icon": "imgs/plugin/marketplace",
+	"SDKVersion": 2,
+	"Software": {
+		"MinimumVersion": "6.5"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "12"
+		},
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "20",
+		"Debug": "enabled"
+	},
+	"UUID": "com.pablo-magaa.sesamecheck"
+}

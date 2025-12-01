@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(streamdeck install:*)",
+      "Bash(streamdeck:*)",
+      "Bash(npm run watch:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.elgato.com)",
+      "Bash(mkdir:*)",
+      "Bash(sips:*)"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "/Users/p.magana/Library/Logs/ElgatoStreamDeck"
+    ]
+  }
+}

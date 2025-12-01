@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sesame HR Login</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background-color: #2e2e2e;
+            color: #ffffff;
+            font-size: 13px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 4px;
+            color: #cccccc;
+            font-weight: 500;
+        }
+
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #555555;
+            border-radius: 4px;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        input[type="email"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #0099ff;
+            box-shadow: 0 0 0 1px #0099ff;
+        }
+
+        button {
+            padding: 8px 16px;
+            background-color: #0099ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        button:hover {
+            background-color: #0077cc;
+        }
+
+        button:disabled {
+            background-color: #555555;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+            font-weight: 500;
+            margin-top: 8px;
+        }
+
+        .status.success {
+            background-color: #006600;
+            color: #ffffff;
+        }
+
+        .status.error {
+            background-color: #cc0000;
+            color: #ffffff;
+        }
+
+        .status.info {
+            background-color: #555555;
+            color: #ffffff;
+        }
+
+        .description {
+            color: #cccccc;
+            font-size: 12px;
+            line-height: 1.4;
+            margin-bottom: 16px;
+        }
+
+        .auth-status {
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .auth-status.authenticated {
+            background-color: #006600;
+            color: #ffffff;
+        }
+
+        .auth-status.not-authenticated {
+            background-color: #cc6600;
+            color: #ffffff;
+        }
+
+        .logout-btn {
+            background-color: #cc4400;
+            margin-top: 8px;
+        }
+
+        .logout-btn:hover {
+            background-color: #aa3300;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="authStatus" class="auth-status" style="display: none;"></div>
+
+        <div id="loginForm">
+            <div class="description">
+                Enter your Sesame HR credentials to enable check-in/check-out functionality.
+            </div>
+
+            <div>
+                <label for="email">Email:</label>
+                <input type="email" id="email" placeholder="your.email@company.com" required>
+            </div>
+
+            <div>
+                <label for="password">Password:</label>
+                <input type="password" id="password" placeholder="Your Sesame HR password" required>
+            </div>
+
+            <button id="loginBtn">Login to Sesame HR</button>
+        </div>
+
+        <div id="loggedInSection" style="display: none;">
+            <div class="description">
+                You are currently logged in to Sesame HR. All actions will use your saved credentials.
+            </div>
+            <button id="logoutBtn" class="logout-btn">Logout</button>
+        </div>
+
+        <div id="status" class="status" style="display: none;"></div>
+    </div>
+
+    <script>
+        // Stream Deck SDK
+        let websocket = null;
+        let uuid = null;
+        let actionInfo = {};
+
+        function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo, inActionInfo) {
+            uuid = inUUID;
+            actionInfo = JSON.parse(inActionInfo);
+
+            websocket = new WebSocket('ws://127.0.0.1:' + inPort);
+
+            websocket.onopen = function() {
+                const json = {
+                    event: inRegisterEvent,
+                    uuid: inUUID
+                };
+                websocket.send(JSON.stringify(json));
+
+                // Request global settings to check authentication status
+                requestGlobalSettings();
+            };
+
+            websocket.onmessage = function(evt) {
+                const jsonObj = JSON.parse(evt.data);
+                if (jsonObj.event === 'didReceiveGlobalSettings') {
+                    handleGlobalSettings(jsonObj.payload.settings);
+                }
+            };
+        }
+
+        function requestGlobalSettings() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const json = {
+                    event: 'getGlobalSettings',
+                    context: uuid
+                };
+                websocket.send(JSON.stringify(json));
+            }
+        }
+
+        function handleGlobalSettings(settings) {
+            console.log('Received global settings:', settings);
+
+            if (settings && settings.isAuthenticated && settings.email) {
+                // User is already authenticated
+                showAuthenticatedState(settings.email);
+            } else {
+                // User needs to login
+                showLoginForm();
+            }
+        }
+
+        function showAuthenticatedState(email) {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('loggedInSection').style.display = 'block';
+
+            const authStatus = document.getElementById('authStatus');
+            authStatus.textContent = `Logged in as: ${email}`;
+            authStatus.className = 'auth-status authenticated';
+            authStatus.style.display = 'block';
+        }
+
+        function showLoginForm() {
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('loggedInSection').style.display = 'none';
+
+            const authStatus = document.getElementById('authStatus');
+            authStatus.textContent = 'Not authenticated - Please login below';
+            authStatus.className = 'auth-status not-authenticated';
+            authStatus.style.display = 'block';
+        }
+
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+            statusEl.style.display = 'block';
+
+            if (type !== 'error') {
+                setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        function sendToPlugin(payload) {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const json = {
+                    event: 'sendToPlugin',
+                    context: uuid,
+                    payload: payload
+                };
+                websocket.send(JSON.stringify(json));
+            }
+        }
+
+        // Login functionality
+        document.getElementById('loginBtn').addEventListener('click', function() {
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value.trim();
+
+            if (!email || !password) {
+                showStatus('Please enter both email and password', 'error');
+                return;
+            }
+
+            const btn = this;
+            btn.disabled = true;
+            btn.textContent = 'Authenticating...';
+
+            // Send credentials to plugin
+            sendToPlugin({
+                event: 'login',
+                email: email,
+                password: password
+            });
+
+            // Reset button after delay and check auth status
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = 'Login to Sesame HR';
+
+                // Request global settings again to check if login was successful
+                requestGlobalSettings();
+            }, 3000);
+        });
+
+        // Logout functionality
+        document.getElementById('logoutBtn').addEventListener('click', function() {
+            sendToPlugin({
+                event: 'logout'
+            });
+
+            setTimeout(() => {
+                requestGlobalSettings();
+            }, 1000);
+        });
+
+        // Allow Enter key to submit
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && document.getElementById('loginForm').style.display !== 'none') {
+                document.getElementById('loginBtn').click();
+            }
+        });
+    </script>
+</body>
+</html>
