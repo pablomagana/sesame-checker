@@ -5,12 +5,13 @@ import { sesameAPI, WorkStatusType, EmployeeCheck } from "../services/sesame-api
 /**
  * Generate an SVG image with black background and white text
  */
-function generateTimerSVG(topText: string, timeText: string): string {
+function generateTimerSVG(topText: string, timeText: string, bottomText?: string): string {
     return `data:image/svg+xml,${encodeURIComponent(`
         <svg width="144" height="144" xmlns="http://www.w3.org/2000/svg">
             <rect width="144" height="144" fill="#000000"/>
             <text x="72" y="45" font-family="Arial, sans-serif" font-size="16" fill="#FFFFFF" text-anchor="middle">${topText}</text>
             <text x="72" y="95" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${timeText}</text>
+            ${bottomText ? `<text x="72" y="128" font-family="Arial, sans-serif" font-size="13" fill="#f59e0b" text-anchor="middle">${bottomText}</text>` : ''}
         </svg>
     `)}`;
 }
@@ -108,11 +109,8 @@ export class WorkTimer extends SingletonAction<WorkTimerSettings> {
         }
 
         if (this.currentStatus === 'paused') {
-            const now = Date.now();
-            const elapsedSeconds = Math.max(0, Math.floor((now - this.lastApiUpdateTime) / 1000));
-            const totalPauseSeconds = this.currentPauseSeconds + elapsedSeconds;
-            const formattedPause = sesameAPI.formatWorkTime(totalPauseSeconds);
-            const svgPause = generateTimerSVG("En pausa", `☕ ${formattedPause}`);
+            const formattedWork = sesameAPI.formatWorkTime(this.currentWorkSeconds);
+            const svgPause = generateTimerSVG("Hoy llevas", formattedWork, "☕ En pausa");
             action.setImage(svgPause);
             return;
         }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Elgato Stream Deck plugin for Sesame HR time tracking. It provides physical buttons on a Stream Deck device to check in/out, pause work, and display current work time. The plugin communicates with the Sesame HR API (`https://back-eu1.sesametime.com/api/v3`) and includes a WebSocket client for real-time status updates from `wss://stream-eu1.sesametime.com`.
+This is an Elgato Stream Deck plugin for Sesame HR time tracking. It provides physical buttons on a Stream Deck device to check in/out, pause work, and display current work time. The plugin communicates with the Sesame HR API and uses polling for real-time status updates.
 
 ## Build & Development Commands
 
@@ -22,23 +22,21 @@ streamdeck restart com.pablo-magaa.sesamecheck
 streamdeck install com.pablo-magaa.sesamecheck.sdPlugin
 ```
 
-The build process uses Rollup to bundle TypeScript into `com.pablo-magaa.sesamecheck.sdPlugin/bin/plugin.js`. The watch command includes automatic plugin restart on build completion.
+The build process uses Rollup to bundle TypeScript into `com.pablo-magaa.sesamecheck.sdPlugin/bin/plugin.js`. The watch command includes automatic plugin restart on build completion. Sourcemaps are only emitted in watch mode.
 
 ## Architecture
 
 ### Plugin Structure
 
-The plugin follows the Elgato Stream Deck SDK architecture with a clear separation between actions, services, and the main plugin entry point:
-
-- **Entry Point**: `src/plugin.ts` - Registers all actions, initializes WebSocket connection, handles global settings
+- **Entry Point**: `src/plugin.ts` - Registers all actions, initializes polling, handles global settings
 - **Actions**: `src/actions/` - Each action is a `SingletonAction` class (one instance handles all button instances)
-- **Services**: `src/services/` - Shared business logic for API and WebSocket communication
+- **Services**: `src/services/sesame-api.ts` - Singleton `SesameAPI` class handling auth, API calls, caching, polling, and status change notifications
 
 ### Key Architectural Patterns
 
 #### Singleton Actions with Multiple Instances
 
-Each action class (`CheckIn`, `CheckOut`, `Pause`, `WorkTimer`) is a singleton, but must track multiple button instances that users can place on their Stream Deck. The pattern:
+Each action class (`CheckIn`, `CheckOut`, `Pause`, `WorkTimer`) is a singleton, but must track multiple button instances that users can place on their Stream Deck:
 
 ```typescript
 export class CheckIn extends SingletonAction<CheckInSettings> {
@@ -59,40 +57,58 @@ export class CheckIn extends SingletonAction<CheckInSettings> {
 
 **Important**: Do NOT use `private actions: Set<any>` as the property name - `actions` is already defined in the base class. Use `actionInstances` or similar.
 
-#### Real-Time Updates via WebSocket
+#### Real-Time Updates via Polling
 
-The architecture enables automatic button updates when work status changes on other devices:
+The architecture uses 30-second polling to detect status changes from other devices:
 
-1. **WebSocket Client** (`websocket-client.ts`): Manages connection to `wss://stream-eu1.sesametime.com` with automatic reconnection
-2. **SesameAPI** (`sesame-api.ts`): Central service that listens to WebSocket events and notifies registered listeners
-3. **Actions**: Register status change listeners that update all button instances when status changes
+1. **SesameAPI** (`sesame-api.ts`): Polls `/security/me` every 30 seconds, compares against `lastKnownStatus`, and notifies registered listeners on change
+2. **Actions**: Register status change listeners via `sesameAPI.addStatusChangeListener()` that update all button instances
 
 Status change flow:
 ```
-Server WebSocket Event → WebSocketClient → SesameAPI.clearWorkStatusCache()
-→ statusChangeListeners → Actions.updateAllButtons() → Button UI updates
+Poll (30s interval) → SesameAPI.checkForStatusChanges() → status differs?
+→ clearWorkStatusCache() → statusChangeListeners → Actions.updateAllButtons()
 ```
+
+Polling starts automatically after login and stops on logout.
+
+#### Two API Base URLs
+
+The plugin uses two different API endpoints:
+- **Main API**: `https://back-eu1.sesametime.com/api/v3` - Auth, work status (`/security/me`), check-in/out, pause, work breaks, stats
+- **Mobile API**: `https://back-mobile-eu1.sesametime.com/api/v3` - Employee checks (`/employees/{id}/checks`), requires extra headers (`RSRC: 31`, `Accept: application/json`)
+
+`makeAuthenticatedRequest()` hits the main API; `makeAuthenticatedMobileRequest()` hits the mobile API.
 
 #### Caching Strategy
 
-**SesameAPI Work Status Cache**:
-- 5-minute cache duration (`CACHE_DURATION_MS = 300000`)
+**Work Status Cache** (30 seconds):
+- `CACHE_DURATION_MS = 30000` - Short duration since polling happens every 30 seconds
 - Cleared after any action (check-in, check-out, pause) via `clearWorkStatusCache()`
-- Cleared when WebSocket receives `work_status_changed` event
-- Prevents excessive API calls while maintaining fresh data after state changes
+- Cleared when polling detects a status change
 
-**Pause Action Work Breaks Cache**:
-- Also 5-minute cache for available work breaks
+**Pause Action Work Breaks Cache** (5 minutes):
+- `WORK_BREAKS_CACHE_DURATION = 300000`
 - Preloaded on action appearance if authenticated
 - Stored in both memory and global settings for property inspector access
+
+#### SVG Button Rendering
+
+All actions render button images as inline SVG data URIs (`data:image/svg+xml,...`). Each action has a `generate*SVG()` function:
+- **CheckIn**: Green play triangle (enabled) / gray (disabled)
+- **CheckOut**: Red rounded square (enabled) / gray (disabled)
+- **Pause**: Orange pause bars or hamburger icon for food-related breaks (enabled) / gray (disabled)
+- **WorkTimer**: Black background with white text showing time (`HH:MM`) and status label
+
+Button enabled/disabled states are determined by `workStatus`: `"online"`, `"paused"`, or `"offline"`.
 
 ### Authentication Flow
 
 1. User enters credentials in any action's property inspector
-2. `SesameAPI.login()` authenticates and stores token in global settings
+2. `SesameAPI.login()` authenticates via `POST /security/login` and stores token in global settings
 3. Token persists across plugin restarts via `streamDeck.settings.getGlobalSettings()`
-4. All subsequent API calls use `makeAuthenticatedRequest()` with Bearer token
-5. WebSocket connects automatically after successful login with token as query parameter
+4. All API calls use `makeAuthenticatedRequest()` with Bearer token
+5. Polling starts automatically after successful login
 
 ### Work Status Values
 
@@ -110,7 +126,7 @@ Actions enable/disable buttons based on these states:
 
 **Global Settings** (shared across all actions):
 - `email`, `password`, `token`, `isAuthenticated`
-- `availableWorkBreaks` (for property inspector access)
+- `availableWorkBreaks`, `workBreaksLastUpdated` (for property inspector access)
 - Accessed via `streamDeck.settings.getGlobalSettings()`
 
 **Action Settings** (per-button instance):
@@ -119,56 +135,34 @@ Actions enable/disable buttons based on these states:
 
 ## Important Implementation Details
 
-### Property Name Conflicts
+### Work Timer Time Calculation
 
-When adding private properties to action classes, avoid names that conflict with the base `SingletonAction` class:
-- ❌ `private actions: Set<any>` (conflicts with base class)
-- ✅ `private actionInstances: Set<any>` (no conflict)
+The `WorkTimer` action calculates display time from today's actual checks, not a single timestamp:
 
-### Async Plugin Initialization
-
-The plugin initialization in `plugin.ts` must handle async operations carefully:
-
-```typescript
-// WebSocket initialization is async but plugin continues
-try {
-    await sesameAPI.initializeWebSocket();
-} catch (error) {
-    streamDeck.logger.error('WebSocket initialization error:', error);
-}
-```
-
-### Work Timer Display Updates
-
-The `WorkTimer` action updates every second without making API calls:
-1. Fetches work status once on appearance via API
-2. Stores `lastCheckInTime` from API response
-3. Uses `setInterval` to calculate elapsed time locally
-4. Only makes API calls when action appears or after user actions
-
-This prevents rate limiting and excessive API usage.
+1. Fetches today's checks via `getTodayChecks()` (mobile API)
+2. `calculateDailyMetrics()` sums work seconds from all `"work"` type checks:
+   - Closed checks: uses `accumulatedSeconds` from server, falling back to `checkIn`/`checkOut` date diff
+   - Open checks: calculates elapsed time from `checkIn` to now
+3. For paused state: also calculates active pause seconds from the open pause check
+4. Uses `setInterval(1s)` to increment the display locally between API fetches
+5. Only makes API calls on appearance or after status change events
 
 ### Pause Action Complexity
 
 The Pause action is the most complex because:
 1. Must load available work breaks from API
 2. Stores work breaks in global settings for property inspector
-3. Each button instance can have different selected break
-4. Property inspector sends break selection back to plugin
-5. Button title shows selected break name
+3. Each button instance can have a different selected break
+4. Property inspector sends break selection back to plugin via `sendToPlugin` events
+5. Button icon changes based on break name (hamburger for food breaks, pause bars otherwise)
 
 The property inspector (`ui/pause-form.html`) communicates with the plugin via `sendToPlugin` events.
 
-## WebSocket Integration
+### Property Inspector Forms
 
-See `WEBSOCKET_SETUP.md` for detailed WebSocket configuration and server requirements.
-
-Key points:
-- WebSocket URL: `wss://stream-eu1.sesametime.com`
-- Authentication: Token appended as query parameter
-- Expected event format: `{ type: 'work_status_changed', data: { employeeId, workStatus, timestamp } }`
-- Automatic reconnection every 5 seconds on disconnect
-- Disconnects on logout
+- `ui/login-form.html` - Used by CheckIn, CheckOut, and WorkTimer for authentication
+- `ui/pause-form.html` - Used by Pause for both authentication and work break selection
+- Communication via `sendToPlugin`/`sendToPropertyInspector` with event-based payloads
 
 ## Logging
 
@@ -182,7 +176,7 @@ Logs are written to:
 - macOS: `~/Library/Logs/ElgatoStreamDeck/`
 - Windows: `%APPDATA%\Elgato\StreamDeck\logs\`
 
-The manifest has `"Debug": "enabled"` for Node.js debugging.
+The manifest has `"Debug": "enabled"` for Node.js debugging. Log level is set to `TRACE` in `plugin.ts`.
 
 ## Plugin Manifest
 

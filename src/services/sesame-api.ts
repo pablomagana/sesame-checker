@@ -9,13 +9,26 @@ interface GlobalPluginSettings {
     password?: string;
     token?: string;
     isAuthenticated?: boolean;
+    region?: string;
+    backSubdomain?: string;
+    backMobileSubdomain?: string;
     [key: string]: any; // Index signature for JsonObject compatibility
 }
 
+interface PreLoginData {
+    region: string;
+    backSubdomain: string;
+    backMobileSubdomain: string;
+}
+
 export class SesameAPI {
-    private static readonly BASE_URL = 'https://back-eu1.sesametime.com/api/v3';
-    private static readonly MOBILE_BASE_URL = 'https://back-mobile-eu1.sesametime.com/api/v3';
+    private static readonly PRE_LOGIN_URL = 'https://login.sesametime.com/private/login-finder/v1/pre-login';
+    private static readonly DEFAULT_BASE_URL = 'https://back-eu1.sesametime.com/api/v3';
+    private static readonly DEFAULT_MOBILE_BASE_URL = 'https://back-mobile-eu1.sesametime.com/api/v3';
     private static readonly LOGIN_ENDPOINT = '/security/login';
+
+    private baseUrl = SesameAPI.DEFAULT_BASE_URL;
+    private mobileBaseUrl = SesameAPI.DEFAULT_MOBILE_BASE_URL;
 
     private token: string | null = null;
     private workStatusCache: WorkStatus | null = null;
@@ -29,10 +42,21 @@ export class SesameAPI {
     /**
      * Authenticate with Sesame HR API and store credentials globally
      */
-    async login(email: string, password: string): Promise<boolean> {
+    async login(email: string, password: string, skipRegionResolution = false): Promise<boolean> {
         try {
             streamDeck.logger.info('Starting login process for email:', email);
-            const response = await fetch(`${SesameAPI.BASE_URL}${SesameAPI.LOGIN_ENDPOINT}`, {
+
+            // Resolve region before authenticating (unless already restored from settings)
+            let regionData: PreLoginData | null = null;
+            if (!skipRegionResolution) {
+                regionData = await this.resolveRegion(email);
+                if (!regionData) {
+                    streamDeck.logger.error('Region resolution failed, aborting login');
+                    return false;
+                }
+            }
+
+            const response = await fetch(`${this.baseUrl}${SesameAPI.LOGIN_ENDPOINT}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -52,12 +76,17 @@ export class SesameAPI {
             this.token = response_data.data;
             streamDeck.logger.info('Token received and stored:', this.token ? 'YES' : 'NO');
 
-            // Save credentials and token to global settings
+            // Save credentials, token, and region data to global settings
+            const currentSettings = await streamDeck.settings.getGlobalSettings<GlobalPluginSettings>();
             await streamDeck.settings.setGlobalSettings({
+                ...currentSettings,
                 email,
                 password, // Note: In production, consider encrypting this
                 token: this.token,
-                isAuthenticated: true
+                isAuthenticated: true,
+                region: regionData?.region ?? currentSettings.region,
+                backSubdomain: regionData?.backSubdomain ?? currentSettings.backSubdomain,
+                backMobileSubdomain: regionData?.backMobileSubdomain ?? currentSettings.backMobileSubdomain
             });
 
             streamDeck.logger.info('Credentials saved to global settings');
@@ -106,9 +135,64 @@ export class SesameAPI {
 
         if (settings.email && settings.password) {
             streamDeck.logger.info('Auto-login: Found stored credentials, attempting login...');
-            return await this.login(settings.email, settings.password);
+            // If we have saved region data, restore URLs and skip pre-login
+            const hasRegion = this.applyRegionFromSettings(settings);
+            return await this.login(settings.email, settings.password, hasRegion);
         }
 
+        return false;
+    }
+
+    /**
+     * Resolve the user's region from their email via the pre-login endpoint.
+     * Sets baseUrl and mobileBaseUrl based on the resolved region.
+     */
+    private async resolveRegion(email: string): Promise<PreLoginData | null> {
+        try {
+            streamDeck.logger.info('Resolving region for email:', email);
+            const response = await fetch(SesameAPI.PRE_LOGIN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+
+            if (!response.ok) {
+                streamDeck.logger.error(`Pre-login failed: ${response.status} ${response.statusText}`);
+                return null;
+            }
+
+            const data: any = await response.json();
+            const backSubdomain = data.backSubdomain;
+            const backMobileSubdomain = data.backMobileSubdomain;
+            const region = data.region;
+
+            if (!backSubdomain || !backMobileSubdomain) {
+                streamDeck.logger.error('Pre-login response missing subdomain data:', JSON.stringify(data));
+                return null;
+            }
+
+            this.baseUrl = `https://${backSubdomain}.sesametime.com/api/v3`;
+            this.mobileBaseUrl = `https://${backMobileSubdomain}.sesametime.com/api/v3`;
+
+            streamDeck.logger.info(`Region resolved: ${region}, baseUrl: ${this.baseUrl}, mobileBaseUrl: ${this.mobileBaseUrl}`);
+
+            return { region, backSubdomain, backMobileSubdomain };
+        } catch (error) {
+            streamDeck.logger.error('Error resolving region:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Restore region URLs from saved settings without making an API call.
+     */
+    private applyRegionFromSettings(settings: GlobalPluginSettings): boolean {
+        if (settings.backSubdomain && settings.backMobileSubdomain) {
+            this.baseUrl = `https://${settings.backSubdomain}.sesametime.com/api/v3`;
+            this.mobileBaseUrl = `https://${settings.backMobileSubdomain}.sesametime.com/api/v3`;
+            streamDeck.logger.info(`Region restored from settings: ${settings.region}, baseUrl: ${this.baseUrl}, mobileBaseUrl: ${this.mobileBaseUrl}`);
+            return true;
+        }
         return false;
     }
 
@@ -138,11 +222,17 @@ export class SesameAPI {
      */
     async logout(): Promise<void> {
         this.token = null;
+        this.baseUrl = SesameAPI.DEFAULT_BASE_URL;
+        this.mobileBaseUrl = SesameAPI.DEFAULT_MOBILE_BASE_URL;
+
         await streamDeck.settings.setGlobalSettings({
             email: undefined,
             password: undefined,
             token: undefined,
-            isAuthenticated: false
+            isAuthenticated: false,
+            region: undefined,
+            backSubdomain: undefined,
+            backMobileSubdomain: undefined
         });
 
         // Stop polling on logout
@@ -174,7 +264,7 @@ export class SesameAPI {
             ...options.headers
         };
 
-        const url = `${SesameAPI.BASE_URL}${endpoint}`;
+        const url = `${this.baseUrl}${endpoint}`;
         const requestOptions = {
             ...options,
             headers
@@ -208,7 +298,7 @@ export class SesameAPI {
             ...options.headers
         };
 
-        const url = `${SesameAPI.MOBILE_BASE_URL}${endpoint}`;
+        const url = `${this.mobileBaseUrl}${endpoint}`;
         const requestOptions = {
             ...options,
             headers
@@ -492,6 +582,10 @@ export class SesameAPI {
      * Initialize polling if authenticated
      */
     async initializePolling(): Promise<void> {
+        // Restore region URLs from saved settings before any API calls
+        const settings = await streamDeck.settings.getGlobalSettings<GlobalPluginSettings>();
+        this.applyRegionFromSettings(settings);
+
         const isAuth = await this.isAuthenticated();
         if (isAuth) {
             streamDeck.logger.info('User is authenticated, starting polling...');
