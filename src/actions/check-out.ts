@@ -1,6 +1,7 @@
 import { action, KeyDownEvent, SingletonAction, WillAppearEvent, SendToPluginEvent } from "@elgato/streamdeck";
 import streamDeck from "@elgato/streamdeck";
 import { sesameAPI } from "../services/sesame-api";
+import { showButtonError } from "../utils/error-display";
 
 /**
  * Generate an SVG image with dark background and red rounded square icon (stop icon)
@@ -63,61 +64,31 @@ export class CheckOut extends SingletonAction<CheckOutSettings> {
             // Ensure authentication (auto-login if needed)
             streamDeck.logger.info('Check-out: Starting authentication process');
             const isAuthenticated = await sesameAPI.performLogin();
-            streamDeck.logger.info('Check-out: Authentication status:', isAuthenticated);
-
             if (!isAuthenticated) {
-                streamDeck.logger.error('Check-out: Authentication failed');
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 2000);
+                await showButtonError(ev.action, sesameAPI.lastError || 'Auth failed', () => this.updateButtonState(ev.action));
                 return;
             }
 
-            // Get current work status
-            streamDeck.logger.info('Getting work status...');
             const workStatus = await sesameAPI.getWorkStatus();
-            streamDeck.logger.info('Work status:', workStatus);
-
             if (!workStatus) {
-                streamDeck.logger.error('No work status received');
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 2000);
+                await showButtonError(ev.action, sesameAPI.lastError || 'Status error', () => this.updateButtonState(ev.action));
                 return;
             }
 
-            // Only allow check-out if online or paused
             if (workStatus.workStatus === 'offline') {
-                streamDeck.logger.info('User is offline, cannot check out');
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 2000);
+                await this.updateButtonState(ev.action);
                 return;
             }
-
-            // Perform check-out
-            streamDeck.logger.info(`Attempting to check out employee: ${workStatus.employeeId}`);
 
             const result = await sesameAPI.checkOut(workStatus.employeeId);
-            streamDeck.logger.info('Check-out result:', result);
-
             if (result) {
-                streamDeck.logger.info('Check-out successful');
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 1000);
+                setTimeout(() => { this.updateButtonState(ev.action).catch(() => {}); }, 1000);
             } else {
-                streamDeck.logger.error('Check-out failed');
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 2000);
+                await showButtonError(ev.action, sesameAPI.lastError || 'Check-out failed', () => this.updateButtonState(ev.action));
             }
 
         } catch (error) {
-            streamDeck.logger.error('Check-out error:', error);
-            setTimeout(async () => {
-                await this.updateButtonState(ev.action);
-            }, 2000);
+            await showButtonError(ev.action, 'Error', () => this.updateButtonState(ev.action));
         }
     }
 
@@ -126,27 +97,24 @@ export class CheckOut extends SingletonAction<CheckOutSettings> {
      */
     override async onSendToPlugin(ev: SendToPluginEvent<any, CheckOutSettings>): Promise<void> {
         const { payload } = ev;
-        
+
         if (payload.event === 'login') {
             const { email, password } = payload;
-            
+
             if (!email || !password) {
-                streamDeck.logger.info('Check-out: Invalid credentials provided in login form');
+                await (ev.action as any).sendToPropertyInspector({ event: 'loginResult', success: false, error: 'Enter email and password' });
                 return;
             }
 
-            streamDeck.logger.info('Check-out: Processing login from property inspector');
-            
             const success = await sesameAPI.performLogin(email, password);
-            
+            await (ev.action as any).sendToPropertyInspector({ event: 'loginResult', success, error: sesameAPI.lastError });
+
             if (success) {
-                streamDeck.logger.info('Check-out: Login successful from property inspector');
                 await this.updateButtonState(ev.action);
             } else {
-                streamDeck.logger.error('Check-out: Login failed from property inspector');
+                await showButtonError(ev.action, sesameAPI.lastError || 'Login failed', () => this.updateButtonState(ev.action));
             }
         } else if (payload.event === 'logout') {
-            streamDeck.logger.info('Check-out: Processing logout from property inspector');
             await sesameAPI.logout();
             await this.updateButtonState(ev.action);
         }

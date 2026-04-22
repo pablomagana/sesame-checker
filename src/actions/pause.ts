@@ -1,6 +1,7 @@
 import { action, KeyDownEvent, SingletonAction, WillAppearEvent, SendToPluginEvent, PropertyInspectorDidAppearEvent, DidReceiveSettingsEvent } from "@elgato/streamdeck";
 import streamDeck from "@elgato/streamdeck";
 import { sesameAPI, WorkBreak } from "../services/sesame-api";
+import { showButtonError } from "../utils/error-display";
 
 /**
  * Generate an SVG image with pause icon (two orange bars) or hamburger icon for food breaks
@@ -153,68 +154,37 @@ export class Pause extends SingletonAction<PauseSettings> {
             const isAuthenticated = await sesameAPI.performLogin();
 
             if (!isAuthenticated) {
-                streamDeck.logger.error('Pause: Authentication failed');
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 2000);
+                await showButtonError(ev.action, sesameAPI.lastError || 'Auth failed', () => this.updateButtonState(ev.action));
                 return;
             }
-            streamDeck.logger.info('Pause: Authentication successful');
 
-            // Get current work status
             const workStatus = await sesameAPI.getWorkStatus();
-
             if (!workStatus) {
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 2000);
+                await showButtonError(ev.action, sesameAPI.lastError || 'Status error', () => this.updateButtonState(ev.action));
                 return;
             }
-            streamDeck.logger.info('Pause: Work status:', JSON.stringify(workStatus));
 
-            // Only allow pause if online
             if (workStatus.workStatus !== 'online') {
-                streamDeck.logger.info(`Pause: Cannot pause, status is ${workStatus.workStatus}`);
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 2000);
+                await this.updateButtonState(ev.action);
                 return;
             }
 
-            // Get selected work break from settings
             this.currentSettings = ev.payload.settings || {};
             const selectedBreakId = this.currentSettings.selectedWorkBreakId;
-
             if (!selectedBreakId) {
-                streamDeck.logger.error('Pause: No work break selected in settings');
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 2000);
+                await showButtonError(ev.action, 'No break selected', () => this.updateButtonState(ev.action));
                 return;
             }
 
-            // Perform pause
-            streamDeck.logger.info(`Pause: Starting pause with break ID: ${selectedBreakId}`);
-
             const result = await sesameAPI.pause(workStatus.employeeId, selectedBreakId);
-
             if (result) {
-                streamDeck.logger.info('Pause: Pause successful');
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 1000);
+                setTimeout(() => { this.updateButtonState(ev.action).catch(() => {}); }, 1000);
             } else {
-                streamDeck.logger.error('Pause: Pause failed');
-                setTimeout(async () => {
-                    await this.updateButtonState(ev.action);
-                }, 2000);
+                await showButtonError(ev.action, sesameAPI.lastError || 'Pause failed', () => this.updateButtonState(ev.action));
             }
 
         } catch (error) {
-            streamDeck.logger.error('Pause error:', error);
-            setTimeout(async () => {
-                await this.updateButtonState(ev.action);
-            }, 2000);
+            await showButtonError(ev.action, 'Error', () => this.updateButtonState(ev.action));
         }
     }
 
@@ -228,25 +198,20 @@ export class Pause extends SingletonAction<PauseSettings> {
         
         if (payload.event === 'login') {
             const { email, password } = payload;
-            
+
             if (!email || !password) {
-                streamDeck.logger.info('Pause: Invalid credentials provided in login form');
+                await (ev.action as any).sendToPropertyInspector({ event: 'loginResult', success: false, error: 'Enter email and password' });
                 return;
             }
 
-            streamDeck.logger.info('Pause: Processing login from property inspector');
-            
             const success = await sesameAPI.performLogin(email, password);
-            
+            await (ev.action as any).sendToPropertyInspector({ event: 'loginResult', success, error: sesameAPI.lastError });
+
             if (success) {
-                streamDeck.logger.info('Pause: Login successful from property inspector');
                 await this.updateButtonState(ev.action);
-                
-                // After successful login, load work breaks for the dropdown
-                streamDeck.logger.info('Pause: Login successful, loading work breaks...');
                 await this.loadWorkBreaks(ev.action);
             } else {
-                streamDeck.logger.error('Pause: Login failed from property inspector');
+                await showButtonError(ev.action, sesameAPI.lastError || 'Login failed', () => this.updateButtonState(ev.action));
             }
         } else if (payload.event === 'logout') {
             streamDeck.logger.info('Pause: Processing logout from property inspector');

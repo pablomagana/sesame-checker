@@ -9,7 +9,10 @@
       "WebFetch(domain:docs.elgato.com)",
       "Bash(mkdir:*)",
       "Bash(sips:*)",
-      "Bash(cd /Users/p.magana/Documents/projects/sesamecheck/com.pablo-magaa.sesamecheck.sdPlugin && for f in imgs/plugin/marketplace.png imgs/plugin/category-icon.png imgs/plugin/category-icon@2x.png imgs/actions/counter/icon.png imgs/actions/counter/key.png imgs/actions/worktimer/icon.png imgs/actions/worktimer/key.png imgs/actions/checkin/icon.png imgs/actions/checkin/key.png imgs/actions/checkout/icon.png imgs/actions/checkout/key.png imgs/actions/pause/icon.png imgs/actions/pause/key.png; do if [ -f \"$f\" ]; then sips -g pixelWidth -g pixelHeight \"$f\" 2>/dev/null | tail -2 | tr '\\\\n' ' '; echo \"  $f\"; else echo \"MISSING: $f\"; fi; done)"
+      "Bash(cd /Users/p.magana/Documents/projects/sesamecheck/com.pablo-magaa.sesamecheck.sdPlugin && for f in imgs/plugin/marketplace.png imgs/plugin/category-icon.png imgs/plugin/category-icon@2x.png imgs/actions/counter/icon.png imgs/actions/counter/key.png imgs/actions/worktimer/icon.png imgs/actions/worktimer/key.png imgs/actions/checkin/icon.png imgs/actions/checkin/key.png imgs/actions/checkout/icon.png imgs/actions/checkout/key.png imgs/actions/pause/icon.png imgs/actions/pause/key.png; do if [ -f \"$f\" ]; then sips -g pixelWidth -g pixelHeight \"$f\" 2>/dev/null | tail -2 | tr '\\\\n' ' '; echo \"  $f\"; else echo \"MISSING: $f\"; fi; done)",
+      "Bash(ls:*)",
+      "Bash(tr ;:*)",
+      "Bash(mdfind:*)"
     ],
     "deny": [],
     "ask": [],

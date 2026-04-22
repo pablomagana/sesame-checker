@@ -21,6 +21,13 @@ interface PreLoginData {
     backMobileSubdomain: string;
 }
 
+const ERROR_MESSAGES: Record<string, string> = {
+    'invalid_credentials': 'Email o contraseña incorrectos',
+    'user_not_found': 'Usuario no encontrado',
+    'account_locked': 'Cuenta bloqueada',
+    'too_many_attempts': 'Demasiados intentos',
+};
+
 export class SesameAPI {
     private static readonly PRE_LOGIN_URL = 'https://login.sesametime.com/private/login-finder/v1/pre-login';
     private static readonly DEFAULT_BASE_URL = 'https://back-eu1.sesametime.com/api/v3';
@@ -31,6 +38,7 @@ export class SesameAPI {
     private mobileBaseUrl = SesameAPI.DEFAULT_MOBILE_BASE_URL;
 
     private token: string | null = null;
+    private _lastError: string | null = null;
     private workStatusCache: WorkStatus | null = null;
     private lastWorkStatusFetch: number = 0;
     private readonly CACHE_DURATION_MS = 30000; // Cache for 30 seconds (for polling)
@@ -39,24 +47,29 @@ export class SesameAPI {
     private readonly POLLING_INTERVAL_MS = 30000; // Poll every 30 seconds
     private lastKnownStatus: WorkStatusType | null = null;
 
+    get lastError(): string | null {
+        return this._lastError;
+    }
+
     /**
      * Authenticate with Sesame HR API and store credentials globally
      */
     async login(email: string, password: string, skipRegionResolution = false): Promise<boolean> {
         try {
-            streamDeck.logger.info('Starting login process for email:', email);
+            this._lastError = null;
 
             // Resolve region before authenticating (unless already restored from settings)
             let regionData: PreLoginData | null = null;
             if (!skipRegionResolution) {
                 regionData = await this.resolveRegion(email);
                 if (!regionData) {
-                    streamDeck.logger.error('Region resolution failed, aborting login');
+                    this._lastError = 'Region resolution failed';
                     return false;
                 }
             }
 
-            const response = await fetch(`${this.baseUrl}${SesameAPI.LOGIN_ENDPOINT}`, {
+            const loginUrl = `${this.baseUrl}${SesameAPI.LOGIN_ENDPOINT}`;
+            const response = await fetch(loginUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -65,16 +78,21 @@ export class SesameAPI {
             });
 
             if (!response.ok) {
-                streamDeck.logger.error(`Authentication failed: ${response.status} ${response.statusText}`);
-                throw new Error(`Authentication failed: ${response.statusText}`);
+                const errorBody = await response.text();
+                try {
+                    const parsed = JSON.parse(errorBody);
+                    const apiMsg = parsed?.error?.message;
+                    this._lastError = ERROR_MESSAGES[apiMsg] || apiMsg || `Login failed (${response.status})`;
+                } catch {
+                    this._lastError = `Login failed (${response.status})`;
+                }
+                return false;
             }
 
-            streamDeck.logger.info('Authentication response status:', response.status);
             const response_data: any = await response.json();
 
             // Extract token from response.data
             this.token = response_data.data;
-            streamDeck.logger.info('Token received and stored:', this.token ? 'YES' : 'NO');
 
             // Save credentials, token, and region data to global settings
             const currentSettings = await streamDeck.settings.getGlobalSettings<GlobalPluginSettings>();
@@ -96,7 +114,7 @@ export class SesameAPI {
 
             return true;
         } catch (error) {
-            streamDeck.logger.error('Login error:', error);
+            this._lastError = this._lastError || (error instanceof Error ? error.message : String(error));
             return false;
         }
     }
@@ -149,7 +167,6 @@ export class SesameAPI {
      */
     private async resolveRegion(email: string): Promise<PreLoginData | null> {
         try {
-            streamDeck.logger.info('Resolving region for email:', email);
             const response = await fetch(SesameAPI.PRE_LOGIN_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -157,11 +174,13 @@ export class SesameAPI {
             });
 
             if (!response.ok) {
-                streamDeck.logger.error(`Pre-login failed: ${response.status} ${response.statusText}`);
+                const errorBody = await response.text();
+                streamDeck.logger.error(`Region resolution failed: ${response.status} - ${errorBody}`);
                 return null;
             }
 
-            const data: any = await response.json();
+            const responseJson: any = await response.json();
+            const data = responseJson.data ?? responseJson;
             const backSubdomain = data.backSubdomain;
             const backMobileSubdomain = data.backMobileSubdomain;
             const region = data.region;
@@ -208,12 +227,10 @@ export class SesameAPI {
         // Check if already authenticated
         const token = await this.getToken();
         if (token) {
-            streamDeck.logger.info('Already authenticated with token');
             return true;
         }
 
         // Try auto-login
-        streamDeck.logger.info('Not authenticated, attempting auto-login...');
         return await this.autoLogin();
     }
 
@@ -588,10 +605,7 @@ export class SesameAPI {
 
         const isAuth = await this.isAuthenticated();
         if (isAuth) {
-            streamDeck.logger.info('User is authenticated, starting polling...');
             this.startPolling();
-        } else {
-            streamDeck.logger.info('User not authenticated, skipping polling');
         }
     }
 
@@ -639,6 +653,7 @@ export class SesameAPI {
             if (!response.ok) {
                 const errorText = await response.text();
                 streamDeck.logger.error(`Check-in failed: ${response.status} ${response.statusText} - ${errorText}`);
+                this._lastError = `Check-in failed (${response.status})`;
                 throw new Error(`Check-in failed: ${response.statusText} - ${errorText}`);
             }
 
@@ -651,6 +666,7 @@ export class SesameAPI {
             return data as CheckInResponse;
         } catch (error) {
             streamDeck.logger.error('Check-in error:', error);
+            this._lastError = this._lastError || (error instanceof Error ? error.message : 'Check-in failed');
             return null;
         }
     }
@@ -673,6 +689,7 @@ export class SesameAPI {
             if (!response.ok) {
                 const errorText = await response.text();
                 streamDeck.logger.error(`Pause failed: ${response.status} ${response.statusText} - ${errorText}`);
+                this._lastError = `Pause failed (${response.status})`;
                 throw new Error(`Pause failed: ${response.statusText} - ${errorText}`);
             }
 
@@ -685,6 +702,7 @@ export class SesameAPI {
             return data as PauseResponse;
         } catch (error) {
             streamDeck.logger.error('Pause error:', error);
+            this._lastError = this._lastError || (error instanceof Error ? error.message : 'Pause failed');
             return null;
         }
     }
@@ -733,6 +751,7 @@ export class SesameAPI {
             if (!response.ok) {
                 const errorText = await response.text();
                 streamDeck.logger.error(`Check-out failed: ${response.status} ${response.statusText} - ${errorText}`);
+                this._lastError = `Check-out failed (${response.status})`;
                 throw new Error(`Check-out failed: ${response.statusText} - ${errorText}`);
             }
 
@@ -745,6 +764,7 @@ export class SesameAPI {
             return data as CheckInResponse;
         } catch (error) {
             streamDeck.logger.error('Check-out error:', error);
+            this._lastError = this._lastError || (error instanceof Error ? error.message : 'Check-out failed');
             return null;
         }
     }

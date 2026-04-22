@@ -1,4 +1,4 @@
-import streamDeck, { LogLevel } from "@elgato/streamdeck";
+import streamDeck from "@elgato/streamdeck";
 
 import { WorkTimer } from "./actions/work-timer";
 import { CheckIn } from "./actions/check-in";
@@ -7,7 +7,7 @@ import { Pause } from "./actions/pause";
 import { sesameAPI } from "./services/sesame-api";
 
 // We can enable "trace" logging so that all messages between the Stream Deck, and the plugin are recorded. When storing sensitive information
-streamDeck.logger.setLevel(LogLevel.TRACE);
+streamDeck.logger.setLevel("trace");
 
 streamDeck.logger.info('=== PLUGIN STARTING ===');
 streamDeck.logger.info('About to register actions...');

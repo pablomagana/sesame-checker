@@ -183,6 +183,8 @@
                 const jsonObj = JSON.parse(evt.data);
                 if (jsonObj.event === 'didReceiveGlobalSettings') {
                     handleGlobalSettings(jsonObj.payload.settings);
+                } else if (jsonObj.event === 'sendToPropertyInspector') {
+                    handlePluginMessage(jsonObj.payload);
                 }
             };
         }
@@ -222,11 +224,7 @@
         function showLoginForm() {
             document.getElementById('loginForm').style.display = 'block';
             document.getElementById('loggedInSection').style.display = 'none';
-
-            const authStatus = document.getElementById('authStatus');
-            authStatus.textContent = 'Not authenticated - Please login below';
-            authStatus.className = 'auth-status not-authenticated';
-            authStatus.style.display = 'block';
+            document.getElementById('authStatus').style.display = 'none';
         }
 
         function showStatus(message, type = 'info') {
@@ -239,6 +237,21 @@
                 setTimeout(() => {
                     statusEl.style.display = 'none';
                 }, 3000);
+            }
+        }
+
+        function handlePluginMessage(payload) {
+            if (payload.event === 'loginResult') {
+                const btn = document.getElementById('loginBtn');
+                btn.disabled = false;
+                btn.textContent = 'Login to Sesame HR';
+
+                if (payload.success) {
+                    showStatus('Login successful!', 'success');
+                    requestGlobalSettings();
+                } else {
+                    showStatus(payload.error || 'Login failed', 'error');
+                }
             }
         }
 
@@ -267,21 +280,20 @@
             btn.disabled = true;
             btn.textContent = 'Authenticating...';
 
-            // Send credentials to plugin
             sendToPlugin({
                 event: 'login',
                 email: email,
                 password: password
             });
 
-            // Reset button after delay and check auth status
+            // Fallback timeout in case plugin doesn't respond
             setTimeout(() => {
-                btn.disabled = false;
-                btn.textContent = 'Login to Sesame HR';
-
-                // Request global settings again to check if login was successful
-                requestGlobalSettings();
-            }, 3000);
+                if (btn.disabled) {
+                    btn.disabled = false;
+                    btn.textContent = 'Login to Sesame HR';
+                    requestGlobalSettings();
+                }
+            }, 10000);
         });
 
         // Logout functionality

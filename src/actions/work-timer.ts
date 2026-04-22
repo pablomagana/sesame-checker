@@ -1,6 +1,7 @@
 import { action, KeyDownEvent, SingletonAction, WillAppearEvent, WillDisappearEvent, SendToPluginEvent } from "@elgato/streamdeck";
 import streamDeck from "@elgato/streamdeck";
 import { sesameAPI, WorkStatusType, EmployeeCheck } from "../services/sesame-api";
+import { showButtonError } from "../utils/error-display";
 
 /**
  * Generate an SVG image with black background and white text
@@ -304,27 +305,24 @@ export class WorkTimer extends SingletonAction<WorkTimerSettings> {
      */
     override async onSendToPlugin(ev: SendToPluginEvent<any, WorkTimerSettings>): Promise<void> {
         const { payload } = ev;
-        
+
         if (payload.event === 'login') {
             const { email, password } = payload;
-            
+
             if (!email || !password) {
-                streamDeck.logger.info('Work-timer: Invalid credentials provided in login form');
+                await (ev.action as any).sendToPropertyInspector({ event: 'loginResult', success: false, error: 'Enter email and password' });
                 return;
             }
 
-            streamDeck.logger.info('Work-timer: Processing login from property inspector');
-            
             const success = await sesameAPI.performLogin(email, password);
-            
+            await (ev.action as any).sendToPropertyInspector({ event: 'loginResult', success, error: sesameAPI.lastError });
+
             if (success) {
-                streamDeck.logger.info('Work-timer: Login successful from property inspector');
                 await this.updateWorkTime(ev.action);
             } else {
-                streamDeck.logger.error('Work-timer: Login failed from property inspector');
+                await showButtonError(ev.action, sesameAPI.lastError || 'Login failed', () => this.updateWorkTime(ev.action));
             }
         } else if (payload.event === 'logout') {
-            streamDeck.logger.info('Work-timer: Processing logout from property inspector');
             await sesameAPI.logout();
             await this.updateWorkTime(ev.action);
         }
